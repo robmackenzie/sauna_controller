@@ -77,18 +77,18 @@ void render_ui() {
   img.fillRect(0, 0, 240, 130, background_colour);
 
   // Wifi/MQTT status icons
-  img.drawBitmap(120 - 50, 20, wifi_logo, 24, 17, isAPMode ? ORANGE : (wifiConnected ? GREEN : RED));
-  img.drawBitmap(120 + 50 - 12, 20, mqtt_logo, 17, 17, mqttConnected ? GREEN : RED);
+  img.drawBitmap(120 - 30, 15, wifi_logo, 24, 17, isAPMode ? ORANGE : (wifiConnected ? GREEN : RED));
+  img.drawBitmap(120 + 30 - 12, 15, mqtt_logo, 17, 17, mqttConnected ? GREEN : RED);
 
   img.setTextColor(TFT_LIGHTGRAY, background_colour);
-  img.drawString(String(get_current_temp()) + char(176), 120 - 45, 80, &FreeSans18pt7b_mod);
+  img.drawString(String(get_current_temp()) + char(176), 120 - 65, 80, &FreeSans18pt7b_mod);
   if (in_temperature_setting_mode) img.setTextColor(RED, background_colour);
-  img.drawString(String(target_temp) + char(176), 120 + 45, 80, &FreeSans18pt7b_mod);
+  img.drawString(String(target_temp) + char(176), 120 + 65, 80, &FreeSans18pt7b_mod);
 
   img.setTextColor(WHITE, background_colour);
-  img.drawString("Current", 120 - 45, 110, 2);
+  img.drawString("Current", 120 - 65, 110, 2);
   if (in_temperature_setting_mode) img.setTextColor(RED, background_colour);
-  img.drawString("Target", 120 + 45, 110, 2);
+  img.drawString("Target", 120 + 65, 110, 2);
 
   img.setTextColor(WHITE, BLACK);
   time_t now = time(nullptr);
@@ -114,7 +114,7 @@ int get_current_temp() {
 void reset_params() {
   target_end_time = 0;
   in_temperature_setting_mode = false;
-  target_temp = 0;
+  target_temp = 90;
   mqttPublisherCallback();
 }
 
