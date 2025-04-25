@@ -9,7 +9,10 @@
 #define SAUNA_GPIO_PIN 1
 
 M5Canvas img(&M5Dial.Display);
+
+//Internal Statuses
 time_t target_end_time = 0;
+int target_temp = 90;
 bool in_temperature_setting_mode = false;
 bool mqttConnected = false;
 bool wifiConnected = false;
@@ -17,19 +20,28 @@ bool isAPMode = false;
 bool heating_element_on = false;
 
 long oldPosition;
-int target_temp = 90;
 
-//TODO: Fix beeping. It should be it's own function in loop, do it with a queue or something, with channels.
-//TODO: Add in status checks for the status logos
-//TODO: Better wifi/mqtt config. Currently a mix of config'ed wifi, but hardcoded mqtt
+
+//TODO: Fix beeping. It should be its own function in loop, do it with a queue or something, with channels.
+//TODO: Better wifi/mqtt config. Currently a mix of config'ed wifi, but hardcoded mqtt. Some stuff commented out. Might need to force config mode on button hold or something to configure it.
+//  Might also need to figure out way to store data. Wanted to just use EEPROM, but that might not be easy anymore.
+//TODO: Need to get it to try to reconnect after coming back from wifi. Right now it fails and doesn't try til next boot after creds are put in.
 
 WiFiManager wifiManager;
-WiFiManagerParameter custom_mqtt_server("server", "mqtt server");
+// WiFiManagerParameter custom_mqtt_server("server", "mqtt server");
+// WiFiManagerParameter custom_mqtt_user("server", "mqtt server");
+// WiFiManagerParameter custom_mqtt_password("server", "mqtt server");
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 Scheduler ts;
 
 void setup_mqtt() {
+  // const char* mqtt_server = custom_mqtt_server.getValue();
+  // if (strlen(mqtt_server) == 0) mqtt_server = "homeassistant.local";
+  // const char* mqtt_user = custom_mqtt_user.getValue();
+  // if (strlen(mqtt_user) == 0) mqtt_user = "device";
+  // const char* mqtt_password = custom_mqtt_password.getValue();
+  // if (strlen(mqtt_password) == 0) mqtt_password = "local_device";
   mqttClient.setServer("homeassistant.local", 1883);
   mqttClient.setCallback(mqttCallback);
   if (wifiConnected) {
@@ -48,18 +60,15 @@ void show_boot_screen() {
 }
 
 void connect_wifi() {
-  wifiManager.setConfigPortalBlocking(true);
-  wifiManager.addParameter(&custom_mqtt_server);
-  wifiManager.setSaveParamsCallback(wifiManagerSaveParamsCallback);
-  isAPMode = !wifiManager.autoConnect("Sauna Controller Setup");
-  wifiConnected = WiFi.isConnected();
-}
-
-void wifiManagerSaveParamsCallback() {
-  Serial.println("Get Params:");
-  Serial.print(custom_mqtt_server.getID());
-  Serial.print(" : ");
-  Serial.println(custom_mqtt_server.getValue());
+  wifiManager.setConfigPortalBlocking(false);
+  wifiManager.setConfigPortalTimeout(120);
+  wifiManager.setConnectTimeout(15);
+  // wifiManager.addParameter(&custom_mqtt_server);
+  // wifiManager.addParameter(&custom_mqtt_user);
+  // wifiManager.addParameter(&custom_mqtt_password);
+  // wifiManager.setSaveParamsCallback(wifiManagerSaveParamsCallback);
+  wifiConnected = wifiManager.autoConnect("Sauna Controller Setup");
+  isAPMode = wifiManager.getConfigPortalActive();
 }
 
 void render_ui() {
@@ -68,8 +77,8 @@ void render_ui() {
   img.fillRect(0, 0, 240, 130, background_colour);
 
   // Wifi/MQTT status icons
-  img.drawBitmap(120-50, 20, wifi_logo, 24, 17, isAPMode ? ORANGE : (wifiConnected ? GREEN : RED));
-  img.drawBitmap(120+50-12, 20, mqtt_logo, 17, 17, mqttConnected ? GREEN : RED);
+  img.drawBitmap(120 - 50, 20, wifi_logo, 24, 17, isAPMode ? ORANGE : (wifiConnected ? GREEN : RED));
+  img.drawBitmap(120 + 50 - 12, 20, mqtt_logo, 17, 17, mqttConnected ? GREEN : RED);
 
   img.setTextColor(TFT_LIGHTGRAY, background_colour);
   img.drawString(String(get_current_temp()) + char(176), 120 - 45, 80, &FreeSans18pt7b_mod);
@@ -86,7 +95,7 @@ void render_ui() {
   unsigned long delta_seconds = (target_end_time > now) ? (target_end_time - now) : 0;
   uint8_t seconds = delta_seconds % 60;
   unsigned long mins = (delta_seconds - seconds) / 60;
-  
+
   char time_string[7];
   sprintf(time_string, "%02lu:%02d", mins, seconds);
   img.drawString(time_string, 120, 170, 7);
@@ -102,17 +111,18 @@ int get_current_temp() {
   return 20;
 }
 
-void reset() {
+void reset_params() {
   target_end_time = 0;
   in_temperature_setting_mode = false;
-  target_temp=0;
+  target_temp = 0;
   mqttPublisherCallback();
 }
 
 void handle_button() {
   if (M5Dial.BtnA.wasPressed()) {
     M5Dial.Speaker.tone(2800, 100);
-    reset();
+    //wifiManager.resetSettings(); // Was for testing WIFI
+    reset_params();
   }
 }
 
@@ -127,7 +137,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   else if (String(topic) == "sauna/control/start") {
     target_end_time = time(nullptr) + message.toInt();
   } else if (String(topic) == "sauna/control/stop") {
-    reset();
+    reset_params();
   }
 }
 static m5::touch_state_t touch_prev_state;
@@ -156,7 +166,7 @@ void handle_dial() {
       if (spun_dial_up) target_end_time += 60 * 10;
       else target_end_time = (target_end_time < now + 60 * 5) ? now : target_end_time - 60 * 10;
     }
-  mqttPublisherCallback();
+    mqttPublisherCallback();
   }
   oldPosition = newPosition;
 }
@@ -173,7 +183,12 @@ void mqttPublisherCallback() {
   mqttClient.publish("sauna/status/is_on", should_sauna_be_active() ? "true" : "false");
   mqttClient.publish("sauna/status/is_heating", heating_element_on ? "true" : "false");
 }
-
+void updateInternalStatusCallback() {
+  //Internal Statuses
+  mqttConnected = mqttClient.connected();
+  wifiConnected = WiFi.status() == WL_CONNECTED;
+  isAPMode = wifiManager.getConfigPortalActive();
+}
 void control_sauna() {
   if (should_sauna_be_active() && target_temp > get_current_temp()) {
     digitalWrite(SAUNA_GPIO_PIN, HIGH);
@@ -187,14 +202,19 @@ void control_sauna() {
 Task mqttPublisherTaskFast(3 * 1000, TASK_FOREVER, &mqttPublisherCallback);
 Task mqttPublisherTaskSlow(60 * 1000, TASK_FOREVER, &mqttPublisherCallback);
 Task saunaControlTask(20 * 1000, TASK_FOREVER, &control_sauna);
-
+Task updateInternalStatusTask(200, TASK_FOREVER, &updateInternalStatusCallback);
 void setup() {
+  Serial.begin(115200);
+  Serial.println("m5");
   auto cfg = M5.config();
   M5Dial.begin(cfg, true, false);
+  Serial.println("ShotBoow");
   show_boot_screen();
+  Serial.println("connectWifi");
   connect_wifi();
+  Serial.println("SetupMQTT");
   setup_mqtt();
-
+  Serial.println("ts.init");
   ts.init();
   ts.addTask(mqttPublisherTaskFast);
   ts.addTask(mqttPublisherTaskSlow);
@@ -203,20 +223,24 @@ void setup() {
   ts.addTask(saunaControlTask);
   saunaControlTask.enable();
 
+  ts.addTask(updateInternalStatusTask);
+  saunaControlTask.enable();
+
   M5Dial.Display.setBrightness(24);
   img.createSprite(240, 240);
   img.setTextDatum(middle_center);
   oldPosition = M5Dial.Encoder.read();
   pinMode(SAUNA_GPIO_PIN, OUTPUT);
   digitalWrite(SAUNA_GPIO_PIN, LOW);
-  delay(200);
+  delay(500);
 }
 
 // LOOP TIME
 void loop() {
   M5Dial.update();
   mqttClient.loop();
-  if(should_sauna_be_active()) {
+  wifiManager.process();
+  if (should_sauna_be_active()) {
     mqttPublisherTaskFast.enableIfNot();
   } else {
     mqttPublisherTaskFast.disable();
